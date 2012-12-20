@@ -2,7 +2,7 @@ import AssemblyKeys._
 
 name := "scalding"
 
-version := "0.8.2-SNAPSHOT"
+version := "0.8.2-tres-SNAPSHOT"
 
 organization := "com.twitter"
 
@@ -66,3 +66,9 @@ mergeStrategy in assembly <<= (mergeStrategy in assembly) { (old) =>
     case x => old(x)
   }
 }
+
+publishMavenStyle := true
+
+publishTo := Some("tresata_snapshots" at "http://server01:8080/archiva/repository/snapshots")
+
+credentials += Credentials(Path.userHome / ".m2" / "credentials")
