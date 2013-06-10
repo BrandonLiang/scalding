@@ -56,13 +56,13 @@ class EvalTool extends Tool {
         val tmpJarPath = getTmpJarPath(job)
         logger.info("using hfs temporary file {}", tmpJarPath)
         val jarOut = new JarOutputStream(tmpJarPath.getFileSystem(getConf).create(tmpJarPath, false))
-        for (f <- tmpDir.listFiles()) {
+        tmpDir.listFiles.foreach{ f => {
           jarOut.putNextEntry(new JarEntry(f.getName))
           val fileIn = new FileInputStream(f)
           ByteStreams.copy(fileIn, jarOut)
           fileIn.close()
           f.delete()
-        }
+        }}
         jarOut.close()
 
         // add temporary jar to distributed cache
@@ -70,8 +70,7 @@ class EvalTool extends Tool {
 
         job
       } finally {
-        for (f <- tmpDir.listFiles())
-          f.delete()
+        tmpDir.listFiles.foreach{ f => f.delete() }
         logger.info("deleting temporary dir {}", tmpDir)
         tmpDir.delete()
       }
