@@ -23,14 +23,57 @@ import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.hadoop.filecache.DistributedCache
 import org.apache.hadoop.util.ToolRunner
-import com.twitter.scalding.{ Tool, Args, Job, Mode }
+import com.twitter.scalding.{ Tool, Args, Job, Mode, Local, Hdfs }
 import com.twitter.util.Eval
 import org.slf4j.{ Logger, LoggerFactory }
 
 class EvalTool extends Tool {
   import EvalTool._
 
-  private def getTmpJarPath(job: Job) = new Path(getConf.get("hadoop.tmp.dir"), job.args(Mode.MODE_KEY) + ".jar")
+  private def getTmpJarPath(args: Args): Path =
+    new Path(getConf.get("hadoop.tmp.dir"), args(Mode.MODE_KEY) + ".jar")
+
+  private def compileJob(jobFile: File, tmpDir: Option[File] = None): Args => Job =
+    new Eval(tmpDir).apply[Args => Job](jobFile)
+
+  private def putJarOnHdfs(tmpDir: File, tmpJarPath: Path) {
+    val jarOut = new JarOutputStream(tmpJarPath.getFileSystem(getConf).create(tmpJarPath, false))
+    tmpDir.listFiles.foreach{ f => {
+      jarOut.putNextEntry(new JarEntry(f.getName))
+      val fileIn = new FileInputStream(f)
+      ByteStreams.copy(fileIn, jarOut)
+      fileIn.close()
+      f.delete()
+    }}
+    jarOut.close()
+  }
+
+  private def getHdfsJob(jobFilename: String, args: Args): Job = {
+    // create local temporary dir to compile to
+    val tmpDir = Files.createTempDir()
+    logger.info("using local temporary dir {}", tmpDir)
+
+    try {
+      val job = compileJob(new File(jobFilename), Some(tmpDir))(args)
+
+      // create temporary jar on hdfs
+      val tmpJarPath = getTmpJarPath(args)
+      logger.info("using hfs temporary file {}", tmpJarPath)
+      putJarOnHdfs(tmpDir, tmpJarPath)
+
+      // add temporary jar to distributed cache
+      DistributedCache.addFileToClassPath(tmpJarPath, getConf)
+
+      job
+    } finally {
+      tmpDir.listFiles.foreach{ f => f.delete() }
+      logger.info("deleting temporary dir {}", tmpDir)
+      tmpDir.delete()
+    }
+  }
+
+  private def getLocalJob(jobFilename: String, args: Args): Job =
+    compileJob(new File(jobFilename))(args)
 
   override protected def getJob(args: Args): Job = {
     if(rootJob.isDefined) {
@@ -43,47 +86,30 @@ class EvalTool extends Tool {
       val jobFilename = args.positional(0)
       // Remove the job filename from the positional arguments:
       val nonJobNameArgs = args + ("" -> args.positional.tail)
-
-      // create local temporary dir to compile to
-      val tmpDir = Files.createTempDir()
-      logger.info("using local temporary dir {}", tmpDir)
-
-      try {
-        // compile job
-        val job = new Eval(Some(tmpDir)).apply[Function1[Args, Job]](new File(jobFilename))(nonJobNameArgs)
-
-        // create temporary jar on hdfs
-        val tmpJarPath = getTmpJarPath(job)
-        logger.info("using hfs temporary file {}", tmpJarPath)
-        val jarOut = new JarOutputStream(tmpJarPath.getFileSystem(getConf).create(tmpJarPath, false))
-        tmpDir.listFiles.foreach{ f => {
-          jarOut.putNextEntry(new JarEntry(f.getName))
-          val fileIn = new FileInputStream(f)
-          ByteStreams.copy(fileIn, jarOut)
-          fileIn.close()
-          f.delete()
-        }}
-        jarOut.close()
-
-        // add temporary jar to distributed cache
-        DistributedCache.addFileToClassPath(tmpJarPath, getConf)
-
-        job
-      } finally {
-        tmpDir.listFiles.foreach{ f => f.delete() }
-        logger.info("deleting temporary dir {}", tmpDir)
-        tmpDir.delete()
+      Mode.getMode(args) match {
+        case l: Local => getLocalJob(jobFilename, nonJobNameArgs)
+        case h: Hdfs => getHdfsJob(jobFilename, nonJobNameArgs)
       }
     }
   }
 
-  override protected def run(job : Job) : Int = {
+  override def run(args : Array[String]): Int = {
+    val (mode, jobArgs) = parseModeArgs(args)
+    val jobArgsWithMode = Mode.putMode(mode, jobArgs)
+    // Connect mode with job Args
     try {
-      super.run(job)
+      run(getJob(jobArgsWithMode))
     } finally {
-      val tmpJarPath = getTmpJarPath(job)
-      logger.info("deleting hfs temporary file {}", tmpJarPath)
-      tmpJarPath.getFileSystem(getConf).delete(tmpJarPath, false)
+      mode match {
+        case l: Local => {
+          logger.debug("no cleanup necessary for local mode")
+        }
+        case h: Hdfs => {
+          val tmpJarPath = getTmpJarPath(jobArgsWithMode)
+          logger.info("deleting hfs temporary file {}", tmpJarPath)
+          tmpJarPath.getFileSystem(getConf).delete(tmpJarPath, false)
+        }
+      }
     }
   }
 
