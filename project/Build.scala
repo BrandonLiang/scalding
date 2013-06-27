@@ -125,7 +125,7 @@ object ScaldingBuild extends Build {
     scaldingCommons,
     scaldingEval
   )
-  
+
   lazy val scaldingArgs = Project(
     id = "scalding-args",
     base = file("scalding-args"),
@@ -199,17 +199,13 @@ object ScaldingBuild extends Build {
   lazy val scaldingEval = Project(
     id = "scalding-eval",
     base = file("scalding-eval"),
-    settings = sharedSettings ++ assemblySettings
+    settings = sharedSettings
   ).settings(
     name := "scalding-eval",
     previousArtifact := Some("com.twitter" % "scalding-eval_2.9.2" % "0.8.4"),
     libraryDependencies ++= Seq(
       "com.twitter" %% "util-eval" % "6.3.4"
-    ),
-    mergeStrategy in assembly := { 
-      case PathList("META-INF", xs @ _*) => MergeStrategy.discard
-      case _ => MergeStrategy.first 
-    }
+    )
   ).dependsOn(scaldingCore % "compile->compile;provided->provided;test->test")
 
 }

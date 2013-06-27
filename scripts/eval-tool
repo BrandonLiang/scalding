@@ -1,0 +1,5 @@
+#!/bin/sh -e
+SCRIPT=`readlink -f $0`
+SCRIPT_DIR=`dirname $SCRIPT`
+APP_HOME=$SCRIPT_DIR/..
+hadoop jar $APP_HOME/scalding-eval/target/scala-2.9.2/scalding-eval-assembly-0.8.5.jar

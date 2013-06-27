@@ -86,7 +86,7 @@ class EvalTool extends Tool {
       val jobFilename = args.positional(0)
       // Remove the job filename from the positional arguments:
       val nonJobNameArgs = args + ("" -> args.positional.tail)
-      Mode.getMode(args) match {
+      Mode.getMode(args).get match {
         case l: Local => getLocalJob(jobFilename, nonJobNameArgs)
         case h: Hdfs => getHdfsJob(jobFilename, nonJobNameArgs)
       }
