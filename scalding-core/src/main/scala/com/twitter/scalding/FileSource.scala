@@ -33,7 +33,7 @@ import cascading.tap.Tap
 import cascading.tap.local.FileTap
 import cascading.tuple.{Tuple, TupleEntry, TupleEntryIterator, Fields}
 
-import com.etsy.cascading.tap.local.LocalTap
+//import com.etsy.cascading.tap.local.LocalTap
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.FileStatus
