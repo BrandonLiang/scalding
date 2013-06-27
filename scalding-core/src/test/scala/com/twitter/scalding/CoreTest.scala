@@ -1,3 +1,18 @@
+/*
+Copyright 2012 Twitter, Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 package com.twitter.scalding
 
 import cascading.tuple.Fields
@@ -1503,3 +1518,25 @@ class HangingTest extends Specification {
 }
 */
 
+class Function2Job(args : Args) extends Job(args) {
+  import FunctionImplicits._
+  Tsv("in", ('x,'y)).mapTo(('x, 'y) -> 'xy) { (x: String, y: String) => x + y }.write(Tsv("output"))
+}
+
+class Function2Test extends Specification {
+  import Dsl._
+  noDetailedDiffs() //Fixes an issue with scala 2.9
+  "A Function2Job" should {
+    val input = List(("a", "b"))
+
+    JobTest("com.twitter.scalding.Function2Job")
+      .source(Tsv("in",('x,'y)), input)
+      .sink[String](Tsv("output")) { outBuf =>
+        "convert a function2 to tupled function1" in {
+          outBuf must be_==(List("ab"))
+        }
+      }
+      .run
+      .finish
+  }
+}
