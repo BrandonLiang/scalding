@@ -1,7 +1,7 @@
 // run with:
-// hadoop jar scalding-eval/target/scala-2.9.2/scalding-eval-assembly-0.8.5.jar scalding-eval/test/SomeJob.scala --hdfs --input in.txt --output out
+// hadoop jar scalding-eval/target/scala-2.9.2/scalding-eval-assembly-0.8.6.jar scalding-eval/test/SomeJob.scala --hdfs --input in.txt --output out
 // or:
-// scripts/eval-tool scalding-eval/test/SomeJob.scala --hdfs --input candidates.txt --output out
+// scripts/eval-tool scalding-eval/test/SomeJob.scala --hdfs --input in.txt --output out
 import com.twitter.scalding._
 
 (args : Args) => {
