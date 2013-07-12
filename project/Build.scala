@@ -204,8 +204,10 @@ object ScaldingBuild extends Build {
     name := "scalding-eval",
     previousArtifact := Some("com.twitter" % "scalding-eval_2.9.2" % "0.8.4"),
     libraryDependencies ++= Seq(
-      "com.twitter" %% "util-eval" % "6.3.4"
-    )
+      "com.twitter" %% "util-eval" % "6.3.4",
+      "commons-io" % "commons-io" % "2.1" % "test"
+    ),
+    fork := true
   ).dependsOn(scaldingCore % "compile->compile;provided->provided;test->test")
 
 }

@@ -25,6 +25,8 @@ class Tool extends hadoop.conf.Configured with hadoop.util.Tool {
   // This mutable state is not my favorite, but we are constrained by the Hadoop API:
   var rootJob : Option[(Args) => Job] = None
 
+  val usageMessage = "Usage: Tool <jobClass> --local|--hdfs [args...]"
+
   //  Allows you to set the job for the Tool to run
   def setJobConstructor(jobc : (Args) => Job) {
     if(rootJob.isDefined) {
@@ -40,7 +42,7 @@ class Tool extends hadoop.conf.Configured with hadoop.util.Tool {
       rootJob.get.apply(args)
     }
     else if(args.positional.isEmpty) {
-      sys.error("Usage: Tool <jobClass> --local|--hdfs [args...]")
+      sys.error(usageMessage)
     }
     else {
       val jobName = args.positional(0)

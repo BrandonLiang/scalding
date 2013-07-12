@@ -16,109 +16,51 @@ limitations under the License.
 
 package com.twitter.scalding.eval
 
-import java.util.jar.{ JarOutputStream, JarEntry }
-import java.io.{ File, FileInputStream }
-import com.google.common.io.{ Files, ByteStreams }
-import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.Path
-import org.apache.hadoop.filecache.DistributedCache
+import java.io.File
+
 import org.apache.hadoop.util.ToolRunner
-import com.twitter.scalding.{ Tool, Args, Job, Mode, Local, Hdfs }
-import com.twitter.util.Eval
-import org.slf4j.{ Logger, LoggerFactory }
+import org.apache.hadoop.conf.Configuration
+
+import com.twitter.scalding.{ Job, Tool, Mode, Args, RichXHandler }
 
 class EvalTool extends Tool {
-  import EvalTool._
+  override val usageMessage = "Usage: EvalTool <jobFile> --local|--hdfs [args...]"
 
-  private def getTmpJarPath(args: Args): Path =
-    new Path(getConf.get("hadoop.tmp.dir"), args(Mode.MODE_KEY) + ".jar")
-
-  private def compileJob(jobFile: File, tmpDir: Option[File] = None): Args => Job =
-    new Eval(tmpDir).apply[Args => Job](jobFile)
-
-  private def putJarOnHdfs(tmpDir: File, tmpJarPath: Path) {
-    val jarOut = new JarOutputStream(tmpJarPath.getFileSystem(getConf).create(tmpJarPath, false))
-    tmpDir.listFiles.foreach{ f => {
-      jarOut.putNextEntry(new JarEntry(f.getName))
-      val fileIn = new FileInputStream(f)
-      ByteStreams.copy(fileIn, jarOut)
-      fileIn.close()
-      f.delete()
-    }}
-    jarOut.close()
-  }
-
-  private def getHdfsJob(jobFilename: String, args: Args): Job = {
-    // create local temporary dir to compile to
-    val tmpDir = Files.createTempDir()
-    logger.info("using local temporary dir {}", tmpDir)
-
+  override def run(args : Array[String]) : Int = {
+    val (mode, evalArgs) = parseModeArgs(args)
+    val jobFilename = evalArgs.positional(0) // replace by evalArgs(0) for better error message after pull-480
+    val eval = ScaldingEval[Args => Job](new File(jobFilename))(mode)
     try {
-      val job = compileJob(new File(jobFilename), Some(tmpDir))(args)
-
-      // create temporary jar on hdfs
-      val tmpJarPath = getTmpJarPath(args)
-      logger.info("using hfs temporary file {}", tmpJarPath)
-      putJarOnHdfs(tmpDir, tmpJarPath)
-
-      // add temporary jar to distributed cache
-      DistributedCache.addFileToClassPath(tmpJarPath, getConf)
-
-      job
+      setJobConstructor(eval.get)
+      // Connect mode with job Args
+      val jobArgs = evalArgs + ("" -> evalArgs.positional.tail)
+      run(getJob(Mode.putMode(mode, jobArgs)))
     } finally {
-      tmpDir.listFiles.foreach{ f => f.delete() }
-      logger.info("deleting temporary dir {}", tmpDir)
-      tmpDir.delete()
-    }
-  }
-
-  private def getLocalJob(jobFilename: String, args: Args): Job =
-    compileJob(new File(jobFilename))(args)
-
-  override protected def getJob(args: Args): Job = {
-    if(rootJob.isDefined) {
-      rootJob.get.apply(args)
-    }
-    else if(args.positional.isEmpty) {
-      sys.error("Usage: EvalTool <jobFile> --local|--hdfs [args...]")
-    }
-    else {
-      val jobFilename = args.positional(0)
-      // Remove the job filename from the positional arguments:
-      val nonJobNameArgs = args + ("" -> args.positional.tail)
-      Mode.getMode(args).get match {
-        case l: Local => getLocalJob(jobFilename, nonJobNameArgs)
-        case h: Hdfs => getHdfsJob(jobFilename, nonJobNameArgs)
-      }
-    }
-  }
-
-  override def run(args : Array[String]): Int = {
-    val (mode, jobArgs) = parseModeArgs(args)
-    val jobArgsWithMode = Mode.putMode(mode, jobArgs)
-    // Connect mode with job Args
-    try {
-      run(getJob(jobArgsWithMode))
-    } finally {
-      mode match {
-        case l: Local => {
-          logger.debug("no cleanup necessary for local mode")
-        }
-        case h: Hdfs => {
-          val tmpJarPath = getTmpJarPath(jobArgsWithMode)
-          logger.info("deleting hfs temporary file {}", tmpJarPath)
-          tmpJarPath.getFileSystem(getConf).delete(tmpJarPath, false)
-        }
-      }
+      eval.close()
     }
   }
 
 }
 
 object EvalTool {
-  private val logger = LoggerFactory.getLogger(classOf[EvalTool])
-
   def main(args: Array[String]) {
-    ToolRunner.run(new Configuration, new EvalTool, args)
+    try {
+      ToolRunner.run(new Configuration, new EvalTool, args)
+    } catch {
+      case t: Throwable => {
+         //create the exception URL link in GitHub wiki
+         val gitHubLink = RichXHandler.createXUrl(t)
+         val extraInfo = (if(RichXHandler().handlers.exists(h => h(t))) {
+             RichXHandler.mapping(t.getClass) + "\n"
+         }
+         else {
+           ""
+         }) +
+         "If you know what exactly caused this error, please consider contributing to GitHub via following link.\n" + gitHubLink
+
+         //re-throw the exception with extra info 
+         throw new Throwable(extraInfo, t)
+      }
+    }
   }
 }
