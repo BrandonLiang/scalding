@@ -52,8 +52,7 @@ class ScaldingEvalJob extends Specification {
     val expected = Map("this" -> 2, "is" -> 2, "a" -> 1, "test" -> 2, "another" -> 1)
 
     "create a runnable Job in local mode" in {
-      val eval = ScaldingEval[Args => Job](jobString)(Local(false))
-      JobTest(eval.get)
+      JobTest(ScaldingEval[Args => Job](jobString)(Local(false)))
         .arg("input","fakeInput")
         .arg("output","fakeOutput")
         .source(TextLine("fakeInput"), input)
@@ -69,8 +68,7 @@ class ScaldingEvalJob extends Specification {
     /**
     "create a runnable Job in hadoop mode" in {
       val conf = new Configuration()
-      val eval = ScaldingEval[Args => Job](jobString)(Hdfs(false, conf))
-      JobTest(eval.get)
+      JobTest(ScaldingEval[Args => Job](jobString)(Hdfs(false, conf)))
         .arg("input","fakeInput")
         .arg("output","fakeOutput")
         .source(TextLine("fakeInput"), input)
@@ -81,7 +79,7 @@ class ScaldingEvalJob extends Specification {
         .runHadoopWithConf(new JobConf(conf))
         .finish
     }
-    **/
+      **/
   }
 
 }

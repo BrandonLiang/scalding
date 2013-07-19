@@ -17,26 +17,18 @@ limitations under the License.
 package com.twitter.scalding.eval
 
 import java.io.File
-
 import org.apache.hadoop.util.ToolRunner
-import org.apache.hadoop.conf.Configuration
 
 import com.twitter.scalding.{ Job, Tool, Mode, Args, RichXHandler }
 
 class EvalTool extends Tool {
-  override val usageMessage = "Usage: EvalTool <jobFile> --local|--hdfs [args...]"
-
   override def run(args : Array[String]) : Int = {
     val (mode, evalArgs) = parseModeArgs(args)
-    val jobFilename = evalArgs.positional(0) // replace by evalArgs(0) for better error message after pull-480
-    val eval = ScaldingEval[Args => Job](new File(jobFilename))(mode)
-    try {
-      setJobConstructor(eval.get)
+    ScaldingEval.use[Args => Job, Int](new File(evalArgs.positional(0)), mode){ jc =>
+      setJobConstructor(jc)
       // Connect mode with job Args
       val jobArgs = evalArgs + ("" -> evalArgs.positional.tail)
       run(getJob(Mode.putMode(mode, jobArgs)))
-    } finally {
-      eval.close()
     }
   }
 
@@ -45,7 +37,7 @@ class EvalTool extends Tool {
 object EvalTool {
   def main(args: Array[String]) {
     try {
-      ToolRunner.run(new Configuration, new EvalTool, args)
+      ToolRunner.run(new EvalTool, args)
     } catch {
       case t: Throwable => {
          //create the exception URL link in GitHub wiki
