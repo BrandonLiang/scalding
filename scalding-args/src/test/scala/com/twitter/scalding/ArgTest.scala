@@ -118,5 +118,11 @@ class ArgTest extends Specification {
       a("d") must be_==("e")
     }
 
+    "verify that args belong to an accepted key set" in {
+      val a = Args("a --one --two b --three c d --scalding.tool.mode")
+      a.restrictTo(Set("one", "two", "three", "four"))
+      a.restrictTo(Set("one", "two")) must throwA[java.lang.RuntimeException]
+    }
+
   }
 }

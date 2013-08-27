@@ -141,6 +141,15 @@ class Args(val m : Map[String,List[String]]) extends java.io.Serializable {
     }
   }
 
+  /**
+  * Asserts whether all the args belong to the given set of accepted arguments.
+  * If an arg does not belong to the given set, you get an error.
+  */
+  def restrictTo(acceptedArgs: Set[String]) : Unit = {
+    val invalidArgs = m.keySet.filter(!_.startsWith("scalding.")) -- (acceptedArgs + "" + "tool.graph" + "hdfs" + "local")
+    if (!invalidArgs.isEmpty) sys.error("Invalid args: " + invalidArgs.map("--" + _).mkString(", "))
+  }
+
   // TODO: if there are spaces in the keys or values, this will not round-trip
   override def toString : String = toList.mkString(" ")
 
