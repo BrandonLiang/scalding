@@ -34,7 +34,9 @@ import java.util.concurrent.atomic.AtomicInteger
 object RichPipe extends java.io.Serializable {
   private val nextPipe = new AtomicInteger(-1)
 
-  def apply(p : Pipe) = new RichPipe(p)
+  def apply(p: Pipe): RichPipe = new RichPipe(p)
+
+  implicit def toPipe(rp: RichPipe): Pipe = rp.pipe
 
   def getNextName: String = "_pipe_" + nextPipe.incrementAndGet.toString
 
@@ -56,6 +58,10 @@ object RichPipe extends java.io.Serializable {
   }
 }
 
+/** This is an enrichment-pattern class for cascading.pipe.Pipe.
+ * The rule is to never use this class directly in input or return types, but
+ * only to add methods to Pipe.
+ */
 class RichPipe(val pipe : Pipe) extends java.io.Serializable with JoinAlgorithms {
   // We need this for the implicits
   import Dsl._
@@ -136,7 +142,7 @@ class RichPipe(val pipe : Pipe) extends java.io.Serializable with JoinAlgorithms
   /**
    * Insert a function into the pipeline:
    */
-  def then[T,U](pfn : (T) => U)(implicit in : (RichPipe)=>T, out : (U)=>Pipe) = out(pfn(in(this)))
+  def thenDo[T,U](pfn : (T) => U)(implicit in : (RichPipe)=>T): U = pfn(in(this))
 
   /**
    * group the Pipe based on fields
@@ -167,7 +173,16 @@ class RichPipe(val pipe : Pipe) extends java.io.Serializable with JoinAlgorithms
   /**
    * Merge or Concatenate several pipes together with this one:
    */
-  def ++(that : Pipe) = new Merge(assignName(this.pipe), assignName(that))
+  def ++(that : Pipe): Pipe = {
+    if(this.pipe == that) {
+      // Cascading fails on self merge:
+      // solution by Jack Guo
+      new Merge(assignName(this.pipe), assignName(new Each(that, new Identity)))
+    }
+    else {
+      new Merge(assignName(this.pipe), assignName(that))
+    }
+  }
 
   /**
    * Group all tuples down to one reducer.
@@ -308,6 +323,14 @@ class RichPipe(val pipe : Pipe) extends java.io.Serializable with JoinAlgorithms
       (implicit conv : TupleConverter[A]) : Pipe = {
     conv.assertArityMatches(f)
     new Each(pipe, f, new FilterFunction(fn, conv))
+  }
+
+  /**
+   * Text files can have corrupted data. If you use this function and a
+   * cascading trap you can filter out corrupted data from your pipe.
+   */
+  def verifyTypes[A](f: Fields)(implicit conv: TupleConverter[A]): Pipe  = {
+    pipe.filter(f) { (a: A) => true }
   }
 
   /**
@@ -487,6 +510,14 @@ class RichPipe(val pipe : Pipe) extends java.io.Serializable with JoinAlgorithms
    */
   def sample(percent : Double) : Pipe = new Each(pipe, new Sample(percent))
   def sample(percent : Double, seed : Long) : Pipe = new Each(pipe, new Sample(seed, percent))
+
+  /**
+   * Sample percent of elements with return. percent should be between 0.00 (0%) and 1.00 (100%)
+   * you can provide a seed to get reproducible results
+   *
+   */
+   def sampleWithReplacement(percent : Double) : Pipe = new Each(pipe, new SampleWithReplacement(percent), Fields.ALL)
+   def sampleWithReplacement(percent : Double, seed : Int) : Pipe = new Each(pipe, new SampleWithReplacement(percent, seed), Fields.ALL)
 
   /**
    * Print all the tuples that pass to stdout

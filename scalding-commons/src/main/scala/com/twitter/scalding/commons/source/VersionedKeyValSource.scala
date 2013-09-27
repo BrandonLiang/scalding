@@ -27,10 +27,13 @@ import cascading.tap.Tap
 import cascading.tuple.Fields
 import com.twitter.algebird.Monoid
 import com.twitter.bijection.Injection
-import com.twitter.chill.MeatLocker
+import com.twitter.chill.Externalizer
 import com.twitter.scalding._
 import com.twitter.scalding.source.{ CheckedInversion, MaxFailuresCheck }
 import org.apache.hadoop.mapred.{ JobConf, OutputCollector, RecordReader }
+
+// Get the tuple adding syntax:
+import com.twitter.scalding.TDsl._
 
 /**
  * Source used to write key-value pairs as byte arrays into a versioned store.
@@ -60,12 +63,11 @@ class VersionedKeyValSource[K,V](val path: String, val sourceVersion: Option[Lon
   val keyField = "key"
   val valField = "value"
   val fields = new Fields(keyField, valField)
-  val codecBox = MeatLocker(codec)
+  val codecBox = Externalizer(codec)
 
   override def converter[U >: (K, V)] = TupleConverter.asSuperConverter[(K, V), U](TupleConverter.of[(K, V)])
-  override def localScheme = new TextDelimited(fields)
 
-  override def hdfsScheme =
+  def hdfsScheme =
     HadoopSchemeInstance(new KeyValueByteScheme(fields).asInstanceOf[Scheme[_, _, _, _, _]])
 
   @deprecated("This method is deprecated", "0.1.6")
@@ -89,10 +91,10 @@ class VersionedKeyValSource[K,V](val path: String, val sourceVersion: Option[Lon
   def resourceExists(mode: Mode) =
     mode match {
       case Test(buffers) => {
-        buffers.get(this) map { !_.isEmpty } getOrElse false
+        buffers(this) map { !_.isEmpty } getOrElse false
       }
       case HadoopTest(conf, buffers) => {
-        buffers.get(this) map { !_.isEmpty } getOrElse false
+        buffers(this) map { !_.isEmpty } getOrElse false
       }
       case _ => {
         val conf = new JobConf(mode.asInstanceOf[HadoopMode].jobConf)
@@ -101,13 +103,15 @@ class VersionedKeyValSource[K,V](val path: String, val sourceVersion: Option[Lon
     }
 
   override def createTap(readOrWrite: AccessMode)(implicit mode: Mode): Tap[_,_,_] = {
+    import com.twitter.scalding.CastHfsTap
     mode match {
       case Hdfs(_strict, _config) =>
         readOrWrite match {
-          case Read  => castHfsTap(source)
-          case Write => castHfsTap(sink)
+          case Read  => CastHfsTap(source)
+          case Write => CastHfsTap(sink)
         }
-      case _ => super.createTap(readOrWrite)(mode)
+      case _ =>
+        TestTapFactory(this, hdfsScheme).createTap(readOrWrite)
     }
   }
 
@@ -140,7 +144,7 @@ class VersionedKeyValSource[K,V](val path: String, val sourceVersion: Option[Lon
   override def hashCode = toString.hashCode
 }
 
-object RichPipeEx extends FieldConversions with TupleConversions with java.io.Serializable {
+object RichPipeEx extends java.io.Serializable {
   implicit def pipeToRichPipeEx(pipe: Pipe): RichPipeEx = new RichPipeEx(pipe)
   implicit def typedPipeToRichPipeEx[K: Ordering, V: Monoid](pipe: TypedPipe[(K,V)]) =
     new TypedRichPipeEx(pipe)
@@ -199,7 +203,7 @@ class RichPipeEx(pipe: Pipe) extends java.io.Serializable {
         val newPairs = appendToken(pipe, 1)
 
         (oldPairs ++ newPairs)
-          .groupBy('key) { _.reducers(reducers).sortBy('isNew).plus[V]('value) }
+          .groupBy('key) { _.reducers(reducers).sortBy('isNew).sum[V]('value) }
           .project(('key,'value))
           .rename(('key, 'value) -> fields)
       }

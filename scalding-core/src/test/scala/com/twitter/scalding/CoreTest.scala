@@ -51,6 +51,36 @@ class NumberJoinTest extends Specification {
   }
 }
 
+class SpillingJob(args: Args) extends Job(args) {
+  TypedTsv[(Int, Int)]("input").read.rename((0,1) -> ('n, 'v))
+    .groupBy('n) { group =>
+    group.spillThreshold(3).sum[Int]('v).size
+  }.write(Tsv("output"))
+}
+
+
+class SpillingTest extends Specification {
+  import Dsl._
+  "A SpillingJob" should {
+    val src = (0 to 9).map(_ -> 1) ++ List(0 -> 4)
+    val result = src.groupBy(_._1)
+      .mapValues { v => (v.map(_._2).sum, v.size) }
+      .map { case (a, (b, c)) => (a, b, c) }
+      .toSet
+
+    //Set up the job:
+    "work when number of keys exceeds spill threshold" in {
+      JobTest(new SpillingJob(_))
+        .source(TypedTsv[(Int, Int)]("input"), src)
+        .sink[(Int, Int, Int)](Tsv("output")) { outBuf =>
+        outBuf.toSet must be_==(result)
+      }.run
+        .runHadoop
+        .finish
+    }
+  }
+}
+
 object GroupRandomlyJob {
   val NumShards = 10
 }
@@ -525,6 +555,9 @@ class MergeTestJob(args : Args) extends Job(args) {
   val small = in.filter('x) { (x:Double) => (x <= 0.5) }
   (big ++ small).groupBy('x) { _.max('y) }
   .write(Tsv(args("out")))
+  // Self merge should work
+  (big ++ big).groupBy('x) { _.max('y) }
+  .write(Tsv("out2"))
 }
 
 class MergeTest extends Specification {
@@ -549,6 +582,11 @@ class MergeTest extends Specification {
       sink[(Double,Double)](Tsv("fakeOutput")) { outBuf =>
         "correctly merge two pipes" in {
           golden must be_==(outBuf.toMap)
+        }
+      }.
+      sink[(Double,Double)](Tsv("out2")) { outBuf =>
+        "correctly self merge" in {
+          outBuf.toMap must be_==(big.groupBy(_._1).mapValues{iter => iter.map(_._2).max})
         }
       }.
       run.
@@ -1539,4 +1577,64 @@ class Function2Test extends Specification {
       .run
       .finish
   }
+}
+
+
+class SampleWithReplacementJob(args : Args) extends Job(args) {
+  val input = Tsv("in").read
+    .sampleWithReplacement(1.0, 0)
+    .write(Tsv("output"))
+}
+
+class SampleWithReplacementTest extends Specification {
+  import com.twitter.scalding.mathematics.Poisson
+
+  val p = new Poisson(1.0, 0)
+  val simulated = (1 to 100).map{
+    i => i -> p.nextInt
+  }.filterNot(_._2 == 0).toSet
+
+  noDetailedDiffs()
+  "A SampleWithReplacementJob" should {
+    JobTest("com.twitter.scalding.SampleWithReplacementJob")
+      .source(Tsv("in"), (1 to 100).map(i => i) )
+      .sink[Int](Tsv("output")) { outBuf => ()
+        "sampleWithReplacement must sample items according to a poisson distribution" in {
+          outBuf.toList.groupBy(i => i)
+          .map(p => p._1 -> p._2.size)
+          .filterNot(_._2 == 0).toSet must_== simulated
+        }
+      }
+      .run
+      .finish
+  }
+}
+
+class VerifyTypesJob(args: Args) extends Job(args) {
+  Tsv("input", new Fields("age", "weight"))
+  	.addTrap(Tsv("trap"))
+    .verifyTypes[(Int, Int)]('age -> 'weight)
+    .verifyTypes[Int]('weight)
+    .write(Tsv("output"))
+}
+
+class VerifyTypesJobTest extends Specification {
+  "Verify types operation" should {
+    "put bad records in a trap" in {
+           val input = List((3, "aaa"),(23,154),(15,"123"),(53,143),(7,85),(19,195),
+             (42,187),(35,165),(68,121),(13,"34"),(17,173),(2,13),(2,"break"))
+
+           JobTest(new com.twitter.scalding.VerifyTypesJob(_))
+             .source(Tsv("input", new Fields("age", "weight")), input)
+             .sink[(Int, Int)](Tsv("output")) { outBuf =>
+               outBuf.toList.size must_== input.size - 2
+             }
+             .sink[(Any, Any)](Tsv("trap")) { outBuf =>
+               outBuf.toList.size must_== 2
+             }
+             .run
+             .finish
+
+         }
+  	}
 }

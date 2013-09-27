@@ -22,7 +22,7 @@ import cascading.pipe.Pipe
 import cascading.scheme.Scheme
 import cascading.tap.Tap
 import com.twitter.bijection.Injection
-import com.twitter.chill.MeatLocker
+import com.twitter.chill.Externalizer
 import com.twitter.scalding._
 import java.util.{ List => JList }
 import org.apache.hadoop.mapred.{ JobConf, OutputCollector, RecordReader }
@@ -160,11 +160,8 @@ extends Source with Mappable[T] {
     new PailTap(rootPath, opts)
   }
 
-  override def hdfsScheme = getTap.getScheme
-    .asInstanceOf[Scheme[JobConf, RecordReader[_, _], OutputCollector[_, _], Array[Object], Array[Object]]]
-
   override def createTap(readOrWrite: AccessMode)(implicit mode: Mode): Tap[_, _, _] = {
-    val tap = castHfsTap(getTap)
+    val tap = com.twitter.scalding.CastHfsTap(getTap)
 
     mode match {
       case Hdfs(strict, config) =>
@@ -172,7 +169,8 @@ extends Source with Mappable[T] {
           case Read  => tap
           case Write => tap
         }
-      case _ => super.createTap(readOrWrite)(mode)
+      case _ =>
+        TestTapFactory(this, tap.getScheme).createTap(readOrWrite)(mode)
     }
   }
 
