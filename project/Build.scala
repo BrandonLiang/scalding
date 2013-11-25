@@ -4,15 +4,13 @@ import sbt._
 import Keys._
 import sbtassembly.Plugin._
 import AssemblyKeys._
-import sbtgitflow.ReleasePlugin._
 import com.typesafe.tools.mima.plugin.MimaPlugin.mimaDefaultSettings
 import com.typesafe.tools.mima.plugin.MimaKeys._
 
 import scala.collection.JavaConverters._
 
 object ScaldingBuild extends Build {
-  val sharedSettings = Project.defaultSettings ++ assemblySettings ++
-    releaseSettings ++ Seq(
+  val sharedSettings = Project.defaultSettings ++ assemblySettings ++ Seq(
     organization := "com.twitter",
 
     //TODO: Change to 2.10.* when Twitter moves to Scala 2.10 internally
@@ -31,7 +29,9 @@ object ScaldingBuild extends Build {
       "releases" at "http://oss.sonatype.org/content/repositories/releases",
       "Concurrent Maven Repo" at "http://conjars.org/repo",
       "Clojars Repository" at "http://clojars.org/repo",
-      "Twitter Maven" at "http://maven.twttr.com"
+      "Twitter Maven" at "http://maven.twttr.com",
+      "tresata-snapshots" at "http://server01:8080/archiva/repository/snapshots",
+      "tresata-releases" at "http://server01:8080/archiva/repository/internal"
     ),
 
     parallelExecution in Test := false,
@@ -71,7 +71,6 @@ object ScaldingBuild extends Build {
           jar => excludes(jar.data.getName)
         }
     },
-
     // Some of these files have duplicates, let's ignore:
     mergeStrategy in assembly <<= (mergeStrategy in assembly) {
       (old) => {
@@ -80,6 +79,8 @@ object ScaldingBuild extends Build {
         case s if s.endsWith(".html") => MergeStrategy.last
         case s if s.endsWith(".dtd") => MergeStrategy.last
         case s if s.endsWith(".xsd") => MergeStrategy.last
+        case s if s.endsWith(".jnilib") => MergeStrategy.rename
+        case s if s.endsWith("jansi.dll") => MergeStrategy.rename
         case x => old(x)
       }
     },
@@ -130,7 +131,8 @@ object ScaldingBuild extends Build {
     scaldingDate,
     scaldingCore,
     scaldingCommons,
-    scaldingAvro
+    scaldingAvro,
+    scaldingRepl
   )
 
   /**
@@ -156,35 +158,33 @@ object ScaldingBuild extends Build {
 
   lazy val scaldingArgs = module("args")
 
-  lazy val scaldingDate = module("date").settings(
-    libraryDependencies += "commons-lang" % "commons-lang" % "2.4"
-  )
+  lazy val scaldingDate = module("date")
 
   lazy val cascadingVersion =
-    System.getenv.asScala.getOrElse("SCALDING_CASCADING_VERSION", "2.1.6")
-
+    System.getenv.asScala.getOrElse("SCALDING_CASCADING_VERSION", "2.2.0")
 
   val hadoopVersion = "1.1.2"
-  val algebirdVersion = "0.2.0"
-  val bijectionVersion = "0.5.3"
-  val chillVersion = "0.3.2"
+  val algebirdVersion = "0.3.0"
+  val bijectionVersion = "0.5.4"
+  val chillVersion = "0.3.6-SNAPSHOT"
+  val slf4jVersion = "1.6.6"
 
   lazy val scaldingCore = module("core").settings(
     libraryDependencies ++= Seq(
       "cascading" % "cascading-core" % cascadingVersion,
       "cascading" % "cascading-local" % cascadingVersion,
       "cascading" % "cascading-hadoop" % cascadingVersion,
-      "com.twitter" % "maple" % "0.2.7",
+      "com.twitter" % "maple" % "0.3.1",
       "com.twitter" %% "chill" % chillVersion,
       "com.twitter" % "chill-hadoop" % chillVersion,
       "com.twitter" % "chill-java" % chillVersion,
       "com.twitter" %% "bijection-core" % bijectionVersion,
       "com.twitter" %% "algebird-core" % algebirdVersion,
-      "commons-lang" % "commons-lang" % "2.4",
+      // TODO: move this dependency to scalding-json or something
       "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.2.3",
       "org.apache.hadoop" % "hadoop-core" % hadoopVersion % "provided",
-      "org.slf4j" % "slf4j-api" % "1.6.6",
-      "org.slf4j" % "slf4j-log4j12" % "1.6.6" % "provided"
+      "org.slf4j" % "slf4j-api" % slf4jVersion,
+      "org.slf4j" % "slf4j-log4j12" % slf4jVersion % "provided"
     )
   ).dependsOn(scaldingArgs, scaldingDate)
 
@@ -198,16 +198,17 @@ object ScaldingBuild extends Build {
     libraryDependencies ++= Seq(
       "com.backtype" % "dfs-datastores-cascading" % "1.3.4",
       "com.backtype" % "dfs-datastores" % "1.3.4",
-      "commons-io" % "commons-io" % "2.4",
+      // TODO: split into scalding-protobuf
       "com.google.protobuf" % "protobuf-java" % "2.4.1",
       "com.twitter" %% "bijection-core" % bijectionVersion,
       "com.twitter" %% "algebird-core" % algebirdVersion,
       "com.twitter" %% "chill" % chillVersion,
       "com.twitter.elephantbird" % "elephant-bird-cascading2" % "3.0.6",
       "com.hadoop.gplcompression" % "hadoop-lzo" % "0.4.16",
+      // TODO: split this out into scalding-thrift
       "org.apache.thrift" % "libthrift" % "0.5.0",
-      "log4j" % "log4j" % "1.2.16",
-      "org.slf4j" % "slf4j-log4j12" % "1.6.6",
+      "org.slf4j" % "slf4j-api" % slf4jVersion,
+      "org.slf4j" % "slf4j-log4j12" % slf4jVersion % "provided",
       "org.scalacheck" %% "scalacheck" % "1.10.0" % "test",
       "org.scala-tools.testing" %% "specs" % "1.6.9" % "test"
     )
@@ -223,12 +224,27 @@ object ScaldingBuild extends Build {
     libraryDependencies ++= Seq(
       "cascading.avro" % "avro-scheme" % "2.1.2",
       "org.apache.avro" % "avro" % "1.7.4",
+      "org.slf4j" % "slf4j-api" % slf4jVersion,
       "org.apache.hadoop" % "hadoop-core" % hadoopVersion % "provided",
-      "log4j" % "log4j" % "1.2.16",
-      "org.slf4j" % "slf4j-log4j12" % "1.6.6",
+      "org.slf4j" % "slf4j-log4j12" % slf4jVersion % "test",
       "org.scalacheck" %% "scalacheck" % "1.10.0" % "test",
       "org.scala-tools.testing" %% "specs" % "1.6.9" % "test"
     )
+  ).dependsOn(scaldingCore)
+
+  lazy val scaldingRepl = Project(
+    id = "scalding-repl",
+    base = file("scalding-repl"),
+    settings = sharedSettings
+  ).settings(
+    name := "scalding-repl",
+    previousArtifact := None,
+    libraryDependencies <++= (scalaVersion) { scalaVersion => Seq(
+      "org.scala-lang" % "jline" % scalaVersion,
+      "org.scala-lang" % "scala-compiler" % scalaVersion,
+      "org.apache.hadoop" % "hadoop-core" % "0.20.2" % "provided"
+    )
+    }
   ).dependsOn(scaldingCore)
 
 }
