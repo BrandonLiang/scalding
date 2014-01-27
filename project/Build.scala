@@ -132,7 +132,9 @@ object ScaldingBuild extends Build {
     scaldingCore,
     scaldingCommons,
     scaldingAvro,
-    scaldingRepl
+    scaldingRepl,
+    scaldingJson,
+    scaldingJdbc
   )
 
   /**
@@ -180,8 +182,6 @@ object ScaldingBuild extends Build {
       "com.twitter" % "chill-java" % chillVersion,
       "com.twitter" %% "bijection-core" % bijectionVersion,
       "com.twitter" %% "algebird-core" % algebirdVersion,
-      // TODO: move this dependency to scalding-json or something
-      "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.2.3",
       "org.apache.hadoop" % "hadoop-core" % hadoopVersion % "provided",
       "org.slf4j" % "slf4j-api" % slf4jVersion,
       "org.slf4j" % "slf4j-log4j12" % slf4jVersion % "provided"
@@ -247,4 +247,31 @@ object ScaldingBuild extends Build {
     }
   ).dependsOn(scaldingCore)
 
+  lazy val scaldingJson = Project(
+    id = "scalding-json",
+    base = file("scalding-json"),
+    settings = sharedSettings
+  ).settings(
+    name := "scalding-json",
+    previousArtifact := None,
+    libraryDependencies <++= (scalaVersion) { scalaVersion => Seq(
+      "org.apache.hadoop" % "hadoop-core" % "0.20.2" % "provided",
+      "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.2.3"
+    )
+    }
+  ).dependsOn(scaldingCore)
+
+  lazy val scaldingJdbc = Project(
+    id = "scalding-jdbc",
+    base = file("scalding-jdbc"),
+    settings = sharedSettings
+  ).settings(
+    name := "scalding-jdbc",
+    previousArtifact := None,
+    libraryDependencies <++= (scalaVersion) { scalaVersion => Seq(
+      "org.apache.hadoop" % "hadoop-core" % "0.20.2" % "provided",
+      "cascading" % "cascading-jdbc-core" % cascadingVersion
+    )
+    }
+  ).dependsOn(scaldingCore)
 }
