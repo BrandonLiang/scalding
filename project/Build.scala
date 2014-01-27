@@ -166,7 +166,7 @@ object ScaldingBuild extends Build {
   val hadoopVersion = "1.1.2"
   val algebirdVersion = "0.3.0"
   val bijectionVersion = "0.5.4"
-  val chillVersion = "0.3.6-SNAPSHOT"
+  val chillVersion = "0.3.6rc1-tres"
   val slf4jVersion = "1.6.6"
 
   lazy val scaldingCore = module("core").settings(
