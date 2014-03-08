@@ -41,8 +41,9 @@ object TypedPipe extends Serializable {
   def from[T](mappable: TypedSource[T])(implicit flowDef: FlowDef, mode: Mode): TypedPipe[T] =
     TypedPipeInst[T](mappable.read, mappable.sourceFields, Converter(mappable.converter))
 
+  // It might pay to use a view here, but you should experiment
   def from[T](iter: Iterable[T])(implicit flowDef: FlowDef, mode: Mode): TypedPipe[T] =
-    IterablePipe[T](iter.view, flowDef, mode)
+    IterablePipe[T](iter, flowDef, mode)
 
   /** Input must be a Pipe with exactly one Field */
   def fromSingleField[T](pipe: Pipe): TypedPipe[T] =
@@ -127,6 +128,13 @@ trait TypedPipe[+T] extends Serializable {
   def collect[U](fn: PartialFunction[T, U]): TypedPipe[U] =
     filter(fn.isDefinedAt(_)).map(fn(_))
 
+  def cross[V](p: ValuePipe[V]) : TypedPipe[(T, V)] =
+    p match {
+      case e@EmptyValue() => e.toTypedPipe
+      case LiteralValue(v) => map { (_, v) }
+      case ComputedValue(pipe) => cross(pipe)
+    }
+
   // prints the current pipe to stdout
   def debug: TypedPipe[T] = map { t => println(t); t }
 
@@ -149,7 +157,7 @@ trait TypedPipe[+T] extends Serializable {
   def eitherValues[K,V,R](that: TypedPipe[(K, R)])(implicit ev: T <:< (K,V)): TypedPipe[(K, Either[V, R])] =
     mapValues { (v: V) => Left(v) } ++ (that.mapValues { (r: R) => Right(r) })
 
-  def map[U](f: T => U): TypedPipe[U] = flatMap { t => Iterable(f(t)) }
+  def map[U](f: T => U): TypedPipe[U] = flatMap { t => Iterator(f(t)) }
 
   def mapValues[K, V, U](f : V => U)(implicit ev: T <:< (K, V)): TypedPipe[(K, U)] =
     map { t: T =>
@@ -160,7 +168,7 @@ trait TypedPipe[+T] extends Serializable {
   /** Keep only items that satisfy this predicate
    */
   def filter(f: T => Boolean): TypedPipe[T] =
-    flatMap { Iterable(_).filter(f) }
+    flatMap { Iterator(_).filter(f) }
 
   /** If T is a (K, V) for some V, then we can use this function to filter.
    * This is here to match the function in KeyedListLike, where it is optimized
@@ -260,13 +268,15 @@ trait TypedPipe[+T] extends Serializable {
     // avoid capturing ev in the closure:
     map { t => t.asInstanceOf[(_, V)]._2 }
 
-  def leftCross[V](p: ValuePipe[V]) : TypedPipe[(T, Option[V])] = {
+  def leftCross[V](p: ValuePipe[V]): TypedPipe[(T, Option[V])] =
     p match {
       case EmptyValue() => map { (_, None) }
       case LiteralValue(v) => map { (_, Some(v)) }
-      case ComputedValue(pipe) => map(((), _)).hashLeftJoin(pipe.groupAll).values
+      case ComputedValue(pipe) => leftCross(pipe)
     }
-  }
+
+  def leftCross[V](thatPipe: TypedPipe[V]): TypedPipe[(T, Option[V])] =
+    map(((), _)).hashLeftJoin(thatPipe.groupAll).values
 
   def mapWithValue[U, V](value: ValuePipe[U])(f: (T, Option[U]) => V) : TypedPipe[V] =
     leftCross(value).map(t => f(t._1, t._2))
@@ -307,6 +317,15 @@ trait TypedPipe[+T] extends Serializable {
       .hashLeftJoin(grouped)
       .map { case (t, (_, optV)) => (t, optV) }
 
+  def sketch[K,V]
+    (reducers: Int,
+     eps: Double = 1.0E-5, //272k width = 1MB per row
+     delta: Double = 0.01, //5 rows (= 5 hashes)
+     seed: Int = 12345)
+    (implicit ev: TypedPipe[T] <:< TypedPipe[(K,V)],
+     serialization: K => Array[Byte],
+     ordering: Ordering[K]): Sketched[K,V] =
+      Sketched(ev(this), reducers, delta, eps, seed)
 }
 
 
@@ -427,12 +446,10 @@ final case class TypedPipeInst[T](@transient inpipe: Pipe,
   @transient protected lazy val pipe: Pipe = toPipe(0)(singleSetter[T])
 
   // Implements a cross product.  The right side should be tiny (< 100MB)
-  override def cross[U](tiny : TypedPipe[U]): TypedPipe[(T,U)] = tiny match {
+  override def cross[U](tiny: TypedPipe[U]): TypedPipe[(T,U)] = tiny match {
     case EmptyTypedPipe(fd, m) => EmptyTypedPipe(fd, m)
     case tpi@TypedPipeInst(_,_,_) =>
-      val crossedPipe = pipe.rename(0 -> 't)
-        .crossWithTiny(tpi.pipe.rename(0 -> 'u))
-      TypedPipe.from(crossedPipe, ('t,'u))(tuple2Converter[T,U])
+      map(((), _)).hashJoin(tiny.groupAll).values
     case MergedTypedPipe(l, r) =>
       MergedTypedPipe(cross(l), cross(r))
     case IterablePipe(iter, _, _) =>

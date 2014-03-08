@@ -8,19 +8,13 @@ require 'trollop'
 require 'yaml'
 
 USAGE = <<END
-Usage : scald.rb [--cp classpath] [--clean] [--jar jarfile] [--shell] [--hdfs|--hdfs-local|--local|--print] [--print-cp] [--scalaversion version] job <job args>
- --cp: scala classpath
- --clean: clean rsync and maven state before running
- --jar: specify the jar file
- --shell: opens a scalding REPL
- --hdfs: if job ends in ".scala" or ".java" and the file exists, link it against JARFILE (below) and then run it on HOST.
-         else, it is assumed to be a full classname to an item in the JARFILE, which is run on HOST
- --hdfs-local: run in hadoop local mode (--local is cascading local mode)
- --host: specify the hadoop host where the job runs
- --local: run in cascading local mode (does not use hadoop)
- --print: print the command YOU SHOULD ENTER on the remote node. Useful for screen sessions.
- --print-cp: prints the classpath of this job.
- --scalaversion: version of Scala for scalac (defaults to scalaVersion in project/Build.scala)
+Usage : scald.rb [options] job <job args>
+
+  If job ends in ".scala" or ".java" and the file exists, then link
+  it against JARFILE (default: versioned scalding-core jar) and run
+  it (default: on HOST).  Otherwise, it is assumed to be a full
+  classname to an item in the JARFILE, which is run.
+
 END
 
 ##############################################################
@@ -90,6 +84,12 @@ OPTS_PARSER = Trollop::Parser.new do
   opt :jar, "Specify the jar file", :type => String
   opt :host, "Specify the hadoop host where the job runs", :type => String
   opt :reducers, "Specify the number of reducers", :type => :int
+  opt :avro, "Add scalding-avro to classpath"
+  opt :commons, "Add scalding-commons to classpath"
+  opt :jdbc, "Add scalding-jdbc to classpath"
+  opt :json, "Add scalding-json to classpath"
+  opt :parquet, "Add scalding-parquet to classpath"
+  opt :repl, "Add scalding-repl to classpath"
 
   stop_on_unknown #Stop parsing for options parameters once we reach the job file.
 end
@@ -129,8 +129,8 @@ end
 
 if ARGV.size < 1
   $stderr.puts USAGE
-  Trollop::options
-  Trollop::die "insufficient arguments passed to scald.rb"
+  OPTS_PARSER::educate
+  exit(0)
 end
 
 SCALA_VERSION= OPTS[:scalaversion] || BUILDFILE.match(/scalaVersion\s*:=\s*\"([^\"]+)\"/)[1]
@@ -138,15 +138,6 @@ SCALA_VERSION= OPTS[:scalaversion] || BUILDFILE.match(/scalaVersion\s*:=\s*\"([^
 SBT_HOME="#{ENV['HOME']}/.sbt"
 
 SCALA_LIB_DIR="#{SBT_HOME}/boot/scala-#{SCALA_VERSION}/lib"
-
-if ( !File.exist?("#{SCALA_LIB_DIR}/scala-library.jar"))
-  #HACK -- for installations using sbt-extras, where scala JARs are in ~/.sbt/<sbt-version>/...
-  #TODO: detect or configure SBT_VERSION
-  SBT_VERSION="0.12.0"
-  puts("can not find #{SCALA_LIB_DIR}/scala-library.jar appending SBT_VERSION [#{SBT_VERSION}] to SBT_HOME")
-  SBT_HOME="#{SBT_HOME}/#{SBT_VERSION}"
-  SCALA_LIB_DIR="#{SBT_HOME}/boot/scala-#{SCALA_VERSION}/lib"
-end
 
 def scala_libs(version)
   if( version.start_with?("2.10") )
@@ -181,6 +172,32 @@ end
 if (!File.exist?(CONFIG["jar"]))
   puts("#{CONFIG["jar"]} is missing, you probably need to run sbt assembly")
   exit(1)
+end
+
+MODULEJARPATHS=[]
+
+if OPTS[:avro]
+  MODULEJARPATHS.push(repo_root + "/scalding-avro/target/scala-#{SHORT_SCALA_VERSION}/scalding-avro-assembly-#{SCALDING_VERSION}.jar")
+end
+
+if OPTS[:commons]
+  MODULEJARPATHS.push(repo_root + "/scalding-commons/target/scala-#{SHORT_SCALA_VERSION}/scalding-commons-assembly-#{SCALDING_VERSION}.jar")
+end
+
+if OPTS[:jdbc]
+  MODULEJARPATHS.push(repo_root + "/scalding-jdbc/target/scala-#{SHORT_SCALA_VERSION}/scalding-jdbc-assembly-#{SCALDING_VERSION}.jar")
+end
+
+if OPTS[:json]
+  MODULEJARPATHS.push(repo_root + "/scalding-json/target/scala-#{SHORT_SCALA_VERSION}/scalding-json-assembly-#{SCALDING_VERSION}.jar")
+end
+
+if OPTS[:parquet]
+  MODULEJARPATHS.push(repo_root + "/scalding-parquet/target/scala-#{SHORT_SCALA_VERSION}/scalding-parquet-assembly-#{SCALDING_VERSION}.jar")
+end
+
+if OPTS[:repl]
+  MODULEJARPATHS.push(repo_root + "/scalding-repl/target/scala-#{SHORT_SCALA_VERSION}/scalding-repl-assembly-#{SCALDING_VERSION}.jar")
 end
 
 JARFILE =
@@ -417,8 +434,7 @@ end
 def build_job_jar
   $stderr.puts("compiling " + JOBFILE)
   FileUtils.mkdir_p(BUILDDIR)
-  classpath = (convert_dependencies_to_jars +
-               ([LIBCP, JARPATH, CLASSPATH].select { |s| s != "" })).join(":")
+  classpath = (([LIBCP, JARPATH, MODULEJARPATHS, CLASSPATH].select { |s| s != "" }) + convert_dependencies_to_jars).flatten.join(":")
   puts("#{file_type}c -classpath #{classpath} -d #{BUILDDIR} #{JOBFILE}")
   unless system("#{COMPILE_CMD} -classpath #{classpath} -d #{BUILDDIR} #{JOBFILE}")
     puts "[SUGGESTION]: Try scald.rb --clean, you may have corrupt jars lying around"
@@ -433,8 +449,10 @@ def build_job_jar
 end
 
 def hadoop_command
-  "HADOOP_CLASSPATH=/usr/share/java/hadoop-lzo-0.4.15.jar:#{JARBASE}:job-jars/#{JOBJAR} " +
-    "hadoop jar #{JARBASE} -libjars job-jars/#{JOBJAR} #{hadoop_opts} #{JOB} --hdfs " +
+  hadoop_classpath = (["/usr/share/java/hadoop-lzo-0.4.15.jar", JARBASE, MODULEJARPATHS.map{|n| File.basename(n)}, "job-jars/#{JOBJAR}"].select { |s| s != "" }).flatten.join(":")
+  hadoop_libjars = ([MODULEJARPATHS.map{|n| File.basename(n)}, "job-jars/#{JOBJAR}"].select { |s| s != "" }).flatten.join(",")
+  "HADOOP_CLASSPATH=#{hadoop_classpath} " +
+    "hadoop jar #{JARBASE} -libjars #{hadoop_libjars} #{hadoop_opts} #{JOB} --hdfs " +
     JOB_ARGS
 end
 
@@ -444,6 +462,15 @@ end
 
 #Always sync the remote JARFILE
 rsync(JARPATH, JARBASE) if !is_local?
+
+#Sync any required scalding modules
+if OPTS[:hdfs] && MODULEJARPATHS != []
+  MODULEJARPATHS.each do|n|
+    rsync(n, File.basename(n))
+  end
+  $stderr.puts("[INFO]: Modules support with --hdfs is experimental.")
+end
+
 #make sure we have the dependencies to compile and run locally (these are not in the above jar)
 #this does nothing if we already have the deps.
 maven_get
@@ -459,14 +486,14 @@ if is_file?
 end
 
 def local_cmd(mode)
-  classpath = (convert_dependencies_to_jars + [JARPATH]).join(":") + (is_file? ? ":#{JOBJARPATH}" : "") +
+  classpath = ([JARPATH, MODULEJARPATHS].select { |s| s != "" } + convert_dependencies_to_jars).flatten.join(":") + (is_file? ? ":#{JOBJARPATH}" : "") +
                 ":" + CLASSPATH
   "java -Xmx#{LOCALMEM} -cp #{classpath} com.twitter.scalding.Tool #{JOB} #{mode} " + JOB_ARGS
 end
 
 SHELL_COMMAND =
   if OPTS[:print_cp]
-    classpath = (convert_dependencies_to_jars + [JARPATH]).join(":") + (is_file? ? ":#{JOBJARPATH}" : "") +
+    classpath = ([JARPATH, MODULEJARPATHS].select { |s| s != "" } + convert_dependencies_to_jars).flatten.join(":") + (is_file? ? ":#{JOBJARPATH}" : "") +
                     ":" + CLASSPATH
     "echo #{classpath}"
   elsif OPTS[:hdfs]

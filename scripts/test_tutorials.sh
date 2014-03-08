@@ -47,3 +47,7 @@ $SCALD tutorial/MatrixTutorial3.scala \
 $SCALD tutorial/MatrixTutorial5.scala \
   --input tutorial/data/graph.tsv \
   --output tutorial/data/cosineSim.tsv
+
+$SCALD --json tutorial/JsonTutorial0.scala
+
+$SCALD --avro --json tutorial/AvroTutorial0.scala
