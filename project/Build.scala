@@ -212,7 +212,7 @@ object ScaldingBuild extends Build {
       "com.twitter" %% "bijection-core" % bijectionVersion,
       "com.twitter" %% "algebird-core" % algebirdVersion,
       "com.twitter" %% "chill" % chillVersion,
-      "com.twitter.elephantbird" % "elephant-bird-cascading2" % "3.0.6",
+      "com.twitter.elephantbird" % "elephant-bird-cascading2" % "4.4",
       "com.hadoop.gplcompression" % "hadoop-lzo" % "0.4.16",
       // TODO: split this out into scalding-thrift
       "org.apache.thrift" % "libthrift" % "0.5.0",
@@ -250,7 +250,7 @@ object ScaldingBuild extends Build {
     //previousArtifact := Some("com.twitter" % "scalding-parquet_2.9.2" % "0.1.0"),
     previousArtifact := None,
     libraryDependencies ++= Seq(
-      "com.twitter" % "parquet-cascading" % "1.3.2",
+      "com.twitter" % "parquet-cascading" % "1.4.0",
       "org.slf4j" % "slf4j-api" % slf4jVersion,
       "org.apache.hadoop" % "hadoop-core" % hadoopVersion % "provided",
       "org.slf4j" % "slf4j-log4j12" % slf4jVersion % "test",
