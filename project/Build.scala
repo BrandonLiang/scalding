@@ -8,6 +8,7 @@ import com.typesafe.tools.mima.plugin.MimaPlugin.mimaDefaultSettings
 import com.typesafe.tools.mima.plugin.MimaKeys._
 import scalariform.formatter.preferences._
 import com.typesafe.sbt.SbtScalariform._
+import net.virtualvoid.sbt.graph.Plugin._
 
 import scala.collection.JavaConverters._
 
@@ -20,7 +21,7 @@ object ScaldingBuild extends Build {
 
   val printDependencyClasspath = taskKey[Unit]("Prints location of the dependencies")
 
-  val sharedSettings = Project.defaultSettings ++ assemblySettings ++ scalariformSettings ++ Seq(
+  val sharedSettings = Project.defaultSettings ++ assemblySettings ++ scalariformSettings ++ graphSettings ++ Seq(
     organization := "com.twitter",
 
     scalaVersion := "2.10.4",
